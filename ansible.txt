@@ -1,0 +1,41 @@
+---
+- hosts: all
+  strategy: free
+  become: False
+  become_method: sudo
+  remote_user: roothp
+  gather_facts: False
+
+  vars: 
+    destination_dir: "/var/apphome/WAS-Updates/"
+	source_dir: "/home/cockpit/WAS_UPdates/"
+  
+  tasks:
+     
+	- name: "Check if directory WAS-Updates exists"
+	  stat:
+         path: "{{ destination_dir }}"
+       register: stat_destination_dir
+	   
+	- name: "Create WAS-Updates directory if doesn't exist"
+	  file:
+         path: "{{ destination_dir }}"
+         state: director
+	     mode: 0755
+		 recurse: yes
+         remote_src: yes
+       register: directory_create
+       when:
+         - stat_destination_dir.stat.exists == False
+		 	 
+	- name: "Copy {{ source_dir }} to {{ destination_dir }}"
+       copy:
+         src: "{{ source_dir }}"
+         dest: "{{ destination_dir }}"
+       register: copy_patch_packages
+       when:
+         - stat_destination_dir.stat.exists == True
+		 
+    - 
+         
+	
