@@ -1,0 +1,26 @@
+---
+- hosts: all
+  strategy: free
+  become: yes
+  become_method: sudo
+  remote_user: roothp
+  gather_facts: True
+
+  vars:
+     app_name: "{{ wsaoApp | lower }}"
+     home_dir: "/var/apphome/{{ app_name}}/{{ instanceName }}/"
+     etc_startup_script: "/etc/init.d/{{ startupScript }}"
+     home_startup_script: "{{ home_dir }}{{ startupScript }}"
+     systemd_startup_script: "/etc/systemd/system/{{ startupScript }}.service"
+     tc_pidfile: "{{ home_dir }}/logs/{{ startupScript }}.pid"
+     tc_lockfile: "{{ home_dir }}/logs/{{ startupScript }}.lck"
+
+  tasks:
+     - name: "Create wrapper script {{ etc_startup_script }}"
+       template:
+         src: /home/ansible/ansible/templates/l3-4_separation/startupscript_template.j2
+         dest: "{{ etc_startup_script }}"
+         owner: "root"
+         group: "root"
+         mode: 0755
+         backup: yes

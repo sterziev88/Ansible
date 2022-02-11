@@ -1,0 +1,125 @@
+---
+- hosts: all
+  strategy: free
+  become: yes
+  become_method: sudo
+  remote_user: roothp
+  gather_facts: True
+
+  vars:
+     app_name: "{{ wsaoApp | lower }}"
+     home_dir: "/var/apphome/{{ app_name}}/{{ instanceName }}/"
+     etc_startup_script: "/etc/init.d/{{ startupScript }}"
+     home_startup_script: "{{ home_dir }}{{ startupScript }}"
+     systemd_startup_script: "/etc/systemd/system/{{ startupScript }}.service"
+     tc_pidfile: "{{ home_dir }}/logs/{{ startupScript }}.pid"
+     tc_lockfile: "{{ home_dir }}/logs/{{ startupScript }}.lck"
+
+  tasks:
+     - name: "Check if {{ home_startup_script }} exist"
+       stat:
+         path: "{{ home_startup_script }}"
+       register: stat_home_startup_script
+
+     - name: "Check {{ etc_startup_script }}"
+       stat:
+         path: "{{ etc_startup_script }}"
+       register: stat_etc_startup_script
+
+     - name: "Get the group of the user from the home directory {{ home_dir }}"
+       stat:
+         path: "{{ home_dir }}"
+       register: group_of_user
+
+     - name: "Copy {{ etc_startup_script }} to {{ home_startup_script }}"
+       copy:
+         src: "{{ etc_startup_script }}"
+         dest: "{{ home_dir }}"
+         owner: "{{ runUser }}"
+         group: "{{ group_of_user.stat.gr_name }}"
+         mode: 0755
+         remote_src: yes
+       register: copy_startupscript
+       when:
+         - stat_home_startup_script.stat.exists == False
+         - stat_etc_startup_script.stat.islnk == False
+
+     - block:
+         - name: "Remove su - from {{ home_startup_script }}"
+           replace:
+             path: "{{ home_startup_script }}"
+             regexp: 'su - \${?TC_RUN_USER}? -c'
+             replace: 'eval'
+             backup: yes
+
+         - name: "Replace pidfile from {{ home_startup_script }} with {{ tc_pidfile }}"
+           lineinfile:
+             path: "{{ home_startup_script }}"
+             regexp: '^\s*#\s*pidfile:'
+             line: '# pidfile: {{ tc_pidfile }}'
+             firstmatch: yes
+
+         - name: "Replace CATALINA_PID from {{ home_startup_script }} with {{ tc_pidfile }}"
+           lineinfile:
+             path: "{{ home_startup_script }}"
+             regexp: '^\s*CATALINA_PID'
+             line: 'CATALINA_PID="{{ tc_pidfile }}"'
+
+         - name: "Replace LOCKFILE from {{ home_startup_script }} with {{ tc_lockfile }}"
+           lineinfile:
+             path: "{{ home_startup_script }}"
+             regexp: '^\s*LOCKFILE'
+             line: 'LOCKFILE="{{ tc_lockfile }}"'
+             firstmatch: yes
+
+         - name: "Remove systemctl start in {{ home_startup_script }}"
+           replace:
+             path: "{{ home_startup_script }}"
+             regexp: 'if \[\[ \$REDHAT_MAJOR_VERSION \-gt 6 \]\]\s*then\s*/bin/systemctl \$ACTION \$SERVICE_NAME\s*exit \$\?\s*else\s*ACTION\=\$\{ACTION\}Action\s*fi'
+             replace: 'ACTION=${ACTION}Action'
+       when:
+         - stat_home_startup_script.stat.exists or (copy_startupscript is defined and copy_startupscript.changed)
+
+     - name: "Remove symlink {{ etc_startup_script }}"
+       file:
+         path: "{{ etc_startup_script }}"
+         state: absent
+       register: symlink_removal
+       when: 
+         - stat_home_startup_script.stat.exists 
+         - stat_etc_startup_script.stat.islnk
+
+     - name: "Create wrapper script {{ etc_startup_script }}"
+       template:
+         src: /home/ansible/ansible/templates/l3-4_separation/startupscript_template.j2
+         dest: "{{ etc_startup_script }}"
+         owner: "root"
+         group: "root"
+         mode: 0755
+         backup: yes
+       when: (stat_home_startup_script.stat.exists == False and stat_etc_startup_script.stat.islnk == False) or symlink_removal.changed
+
+     - name: Create systemd script
+       template:
+         src: /home/ansible/ansible/templates/l3-4_separation/startupscript_template.service.j2
+         dest: "{{ systemd_startup_script }}"
+         owner: "root"
+         group: "root"
+         mode: 0755
+       register: systemd_script
+       when: 
+         - (ansible_distribution == "RedHat" and ansible_distribution_major_version == "7") or (ansible_distribution == "OracleLinux" and ansible_distribution_major_version == "7") 
+#         - symlink_removal.changed or (stat_home_startup_script.stat.exists == False and stat_etc_startup_script.stat.islnk == False)
+
+
+     - name: Reload systemctl
+       systemd:
+         daemon_reload: yes
+       when: systemd_script.changed
+
+
+     - name: "Check pid, lockfile and 'eval' in {{ home_startup_script }}"
+       shell: grep eval "{{ home_startup_script }}"; grep "{{ tc_pidfile }}" "{{ home_startup_script }}"; grep "{{ tc_lockfile }}" "{{ home_startup_script }}"
+
+     - name: "Check if {{ etc_startup_script }} is templated"
+       shell: grep callTomcat "{{ etc_startup_script }}"

@@ -1,0 +1,37 @@
+- hosts: all
+  strategy: free
+  remote_user: roothp
+  become: yes
+  become_method: sudo
+  serial: 100
+  gather_facts: yes
+  
+  
+  tasks:
+  
+    - name: Copy the sudo file performing a check for RHEL 6
+      copy:
+        src: "/home/ansible/ansible/UAM/sudoers/sudoers_files/{{ app_name }}_RHEL6"
+        remote_src: no
+        dest: /etc/sudoers.d/{{ app_name }}
+        owner: root
+        group: root
+        mode: 0440
+        validate: '/usr/sbin/visudo -cf %s'
+      when:
+      - ansible_distribution == "RedHat"
+      - ansible_distribution_major_version == "6" 
+
+    - name: Copy the sudo file performing a check for RHEL 7
+      copy:
+        src: "/home/ansible/ansible/UAM/sudoers/sudoers_files/{{ app_name }}_RHEL7" 
+        remote_src: no
+        dest: /etc/sudoers.d/{{ app_name }}
+        owner: root
+        group: root
+        mode: 0440
+        validate: '/usr/sbin/visudo -cf %s'
+      when:
+      - ansible_distribution == "RedHat"
+      - ansible_distribution_major_version == "7"
+      - ansible_distribution_major_version == "8"
